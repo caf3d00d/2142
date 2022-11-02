@@ -1,10 +1,5 @@
-pub mod structures {
-    use std::mem::ManuallyDrop;
-
-    type Flow = Vec<FlowStructure>;
-
-    /* Registers */
-    enum Register {
+mod Registers {
+    pub enum Register {
         RAX,
         RBX,
         RCX,
@@ -15,14 +10,18 @@ pub mod structures {
         RBP,
         NIL
     }
+}
 
-    /* Data Type Vars */
-    struct GeneralData {
-        t: DataType,
-        d: AnyData
+mod DataTypes {
+    use std::mem::ManuallyDrop;
+    use crate::structures::Registers::Register;
+
+    pub(crate) struct GeneralData {
+        pub(crate) t: DataType,
+        pub(crate) d: AnyData
     }
 
-    enum DataType {
+    pub enum DataType {
         Uint32,
         Uint64,
         Int32,
@@ -34,7 +33,7 @@ pub mod structures {
         Register
     }
 
-    struct AnyData {
+    pub struct AnyData {
         pub uint32: u32,
         pub uint64: u64,
         pub int32: i32,
@@ -190,13 +189,15 @@ pub mod structures {
             }
         }
     }
+}
 
-    /* Env Vars */
+mod EnvVars {
+    use crate::structures::Registers::Register;
+    use crate::structures::DataTypes::{AnyData, DataType, GeneralData};
+
     struct Flags {
         pub zf: bool
     }
-
-
 
     pub struct EnvVars {
         flags: Flags,
@@ -224,6 +225,13 @@ pub mod structures {
             this
         }
     }
+}
+
+pub mod structures {
+    use crate::structures::DataTypes::GeneralData;
+    use crate::structures::EnvVars::EnvVars;
+
+    type Flow = Vec<FlowStructure>;
 
     /* Flow Structure */
     enum OpCode {
