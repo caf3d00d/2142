@@ -347,7 +347,7 @@ mod env_vars {
         flags: Flags,
         registers: Vec<GeneralData>,
         pub pc: i64,
-        stack: Vec<GeneralData>,
+        //stack: Vec<GeneralData>,
     }
 
     impl EnvVars {
@@ -356,7 +356,7 @@ mod env_vars {
                 flags: Flags { zf: false },
                 registers: Vec::with_capacity(Register::NIL as usize),
                 pc: 0,
-                stack: Vec::new(),
+                //stack: Vec::new(),
             };
 
             for _ in 0..this.registers.capacity() {
@@ -378,11 +378,11 @@ mod env_vars {
                 OpCode::SUB => todo!(),
                 OpCode::MUL => todo!(),
                 OpCode::DIV => todo!(),
-                OpCode::MOD => todo!(),
-                OpCode::CMP => todo!(),
-                OpCode::JNE => todo!(),
-                OpCode::JMP => todo!(),
-                OpCode::JE => todo!(),
+                OpCode::MOD => self.modu(&istr.arguments[0], &istr.arguments[1]),
+                OpCode::CMP => self.cmp(&istr.arguments[0], &istr.arguments[1]),
+                OpCode::JNE => self.jne(&istr.arguments[0]),
+                OpCode::JMP => self.jmp(&istr.arguments[0]),
+                OpCode::JE => self.je(&istr.arguments[0]),
                 OpCode::INC => todo!(),
                 OpCode::OR => todo!(),
                 OpCode::AND => todo!(),
@@ -401,7 +401,7 @@ mod env_vars {
 
     impl IstrTraits for EnvVars {
         fn mov(&mut self, register: &GeneralData, any: &GeneralData) {
-            assert_ne!(register.t, DataType::Register);
+            assert!(register.t == DataType::Register);
             let r_id = register.d.register.clone() as usize;
             if any.t == DataType::Register {
                 let a_id = any.d.register.clone() as usize;
@@ -427,7 +427,7 @@ mod env_vars {
                 let data = &self.registers[r_id];
 
                 if right.t == DataType::Register {
-                    let o_id = right.d.register.clone() as usize;
+                    let o_id = right.d.register as usize;
                     let o_data = &self.registers[o_id];
                     assert!(o_data.t == data.t);
 
@@ -446,7 +446,7 @@ mod env_vars {
                         _ => {}
                     }
                 } else {
-                    assert!(right.t == left.t);
+                    assert!(right.t == data.t);
 
                     match data.t {
                         DataType::Uint32 => {
@@ -607,7 +607,12 @@ mod env_vars {
         }
 
         fn dmp(&mut self, any: &GeneralData) {
-            todo!()
+            if any.t == DataType::Register {
+                let r_id = any.d.register as usize;
+                println!("{}", self.registers[r_id]);
+            } else {
+                println!("{}", any);
+            }
         }
 
         fn cmp(&mut self, left: &GeneralData, right: &GeneralData) {
@@ -986,6 +991,128 @@ pub mod tokenizer {
     }
 }
 
+pub mod interpreter {
+    use std::collections::{HashMap, VecDeque};
+    //use std::intrinsics::pref_align_of;
+    use crate::structures::data_types::{AnyData, DataType, GeneralData};
+    use crate::structures::flow_structure::{FlowStructure, OpCode};
+    use crate::structures::tokens::Tokens;
+
+    pub struct Interpreter{}
+
+    type InterpretedCode = Vec<FlowStructure>;
+
+    impl Interpreter {
+        fn cp_pos(tokens: &Vec<Tokens>) -> HashMap<String, usize> {
+            let mut i: usize = 0;
+            let mut cp: HashMap<String, usize> = HashMap::new();
+
+            for t in tokens {
+                match t {
+                    Tokens::CHECKPOINT(cpo) => {
+                        let mut chars = cpo.chars();
+                        chars.next();
+                        cp.insert(String::from(chars.as_str()), i);
+                    },
+                    Tokens::INSTRUCTION(_) => {
+                        i += 1;
+                        continue;
+                    },
+                    _ => continue
+                }
+            }
+            cp
+        }
+
+        pub fn interpret(tokens: &Vec<Tokens>) -> InterpretedCode {
+            let cp = Interpreter::cp_pos(tokens);
+            let mut code: InterpretedCode = InterpretedCode::new();
+            let mut args: VecDeque<GeneralData> = VecDeque::new();
+            let mut queued_istr: OpCode = OpCode::COUNT;
+
+            for token in tokens {
+                match token {
+                    Tokens::CHECKPOINT(_) => continue,
+                    Tokens::COMMENT(_) => continue,
+                    Tokens::GOTO(c_pos) => {
+                        match cp.get(c_pos) {
+                            Some(i) => {
+                                args.push_back(GeneralData{
+                                    t: DataType::Int64, d: AnyData::from(*i as i64)
+                                });
+                            },
+                            None => {},
+                        }
+                    },
+                    Tokens::DATA(t, d) => {
+                        match t {
+                            DataType::Uint32 => {
+                                args.push_back(GeneralData{t: DataType::Uint32, d: AnyData::from(d.uint32)})
+                            }
+                            DataType::Uint64 => {
+                                args.push_back(GeneralData{t: DataType::Uint64, d: AnyData::from(d.uint64)})
+                            }
+                            DataType::Int32 => {
+                                args.push_back(GeneralData{t: DataType::Int32, d: AnyData::from(d.int32)})
+                            }
+                            DataType::Int64 => {
+                                args.push_back(GeneralData{t: DataType::Int64, d: AnyData::from(d.int64)})
+                            }
+                            DataType::Float => {
+                                args.push_back(GeneralData{t: DataType::Float, d: AnyData::from(d.float)})
+                            }
+                            DataType::Double => {
+                                args.push_back(GeneralData{t: DataType::Double, d: AnyData::from(d.double)})
+                            }
+                            DataType::String => {
+                                args.push_back(GeneralData{t: DataType::String, d: AnyData::from(&d.string.to_string())})
+                            }
+                            DataType::Char => {
+                                args.push_back(GeneralData{t: DataType::Char, d: AnyData::from(d.char)})
+                            }
+                            DataType::Register => {
+                                args.push_back(GeneralData{t: DataType::Register, d: AnyData::from(d.register)})
+                            }
+                        }
+                    },
+                    Tokens::REGISTER(reg) => args.push_back(
+                        GeneralData { t: DataType::Register, d: AnyData::from(*reg)}
+                    ),
+                    Tokens::INSTRUCTION(istr) => {
+                        if queued_istr != OpCode::COUNT {
+                            let mut vec: Vec<GeneralData> = Vec::with_capacity(args.len());
+                            while args.len() > 0 {
+                                vec.push(args.pop_front().unwrap());
+                            }
+                            code.push(
+                                FlowStructure {
+                                    op_code: queued_istr,
+                                    arguments: vec
+                                }
+                            );
+                        }
+                        queued_istr = *istr
+                    }
+                }
+            }
+            if args.len() > 0 {
+                let mut vec: Vec<GeneralData> = Vec::with_capacity(args.len());
+                while args.len() > 0 {
+                    vec.push(args.pop_front().unwrap());
+                }
+                code.push(
+                    FlowStructure {
+                        op_code: queued_istr,
+                        arguments: vec
+                    }
+                );
+            }
+
+            code
+        }
+    }
+}
+
 pub mod structures {
     // use crate::structures::data_types::GeneralData;
     use crate::structures::env_vars::EnvVars;
@@ -1013,6 +1140,13 @@ pub mod structures {
                 self.env.execute_istr(istr);
                 self.env.pc += 1;
             }
+        }
+
+        pub fn next(&mut self, flow: Flow) {
+            self.env.pc = 0;
+            self.flow = flow;
+
+            self.run();
         }
     }
 }
