@@ -1,5 +1,8 @@
 mod registers {
-    #[derive(Clone, Copy, Debug)]
+    use num_traits::FromPrimitive;
+    use num_derive::FromPrimitive;
+
+    #[derive(Clone, Copy, Debug, FromPrimitive)]
     pub enum Register {
         RAX,
         RBX,
@@ -11,15 +14,66 @@ mod registers {
         RBP,
         NIL,
     }
+
+    impl Register {
+        pub fn is_reg(name: &String) -> bool {
+            let archm: Vec<&str> = vec!["R", "E", ""];
+            let regs: Vec<&str> = vec!["AX", "BX", "CX", "DX",
+                                        "SI", "DI", "SP", "BP"];
+            let mut reg_table: Vec<String> = Vec::with_capacity(archm.len() * regs.len());
+            for reg in regs {
+                for &modi in &archm {
+                    reg_table.push(format!("{}{}", modi, reg));
+                }
+            }
+
+            reg_table.contains(&name.to_uppercase())
+        }
+
+        pub fn from_string(name: &String) -> Option<Register> {
+            let archm: Vec<&str> = vec!["R", "E", ""];
+            let regs: Vec<&str> = vec!["AX", "BX", "CX", "DX",
+                                       "SI", "DI", "SP", "BP"];
+            let mut reg_table: Vec<String> = Vec::with_capacity(archm.len() * regs.len());
+            for reg in regs {
+                for &modi in &archm {
+                    reg_table.push(format!("{}{}", modi, reg));
+                }
+            }
+            let p: String = name.to_uppercase();
+            let i = reg_table.iter().position(|ins | &p == ins);
+            match i {
+                Some(idx) => FromPrimitive::from_usize(idx / archm.len()),
+                None => None,
+            }
+        }
+    }
 }
 
 mod data_types {
+    use std::fmt::{Display, Formatter};
     use crate::structures::registers::Register;
     use std::mem::ManuallyDrop;
 
     pub struct GeneralData {
-        pub(crate) t: DataType,
-        pub(crate) d: AnyData,
+        pub t: DataType,
+        pub d: AnyData,
+    }
+
+    impl Display for GeneralData {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            match self.t {
+                DataType::Uint32 => write!(f, "{}", self.d.uint32),
+                DataType::Uint64 => write!(f, "{}", self.d.uint64),
+                DataType::Int32 => write!(f, "{}", self.d.int32),
+                DataType::Int64 => write!(f, "{}", self.d.int64),
+                DataType::Float => write!(f, "{}", self.d.float),
+                DataType::Double => write!(f, "{}", self.d.double),
+                DataType::String => write!(f, "{}", self.d.string.as_str()),
+                DataType::Char => write!(f, "{}", self.d.char),
+                DataType::Register => write!(f, "{:?}", self.d.register),
+            }
+        }
     }
 
     #[derive(Debug, PartialEq, Clone, Copy)]
@@ -195,7 +249,10 @@ mod data_types {
 
 mod flow_structure {
     use crate::structures::data_types::GeneralData;
+    use num_traits::FromPrimitive;
+    use num_derive::FromPrimitive;
 
+    #[derive(Debug, FromPrimitive, Clone, Copy, PartialEq)]
     pub enum OpCode {
         MOV,
         PUSH,
@@ -221,6 +278,38 @@ mod flow_structure {
         MALLOC,
         FREE,
         COUNT,
+    }
+
+    impl OpCode {
+        pub fn isop(name: &String) -> bool {
+            let mut istr: Vec<String> = Vec::with_capacity(OpCode::COUNT as usize);
+
+            for i in 0..(OpCode::COUNT as i32) {
+                let oc: OpCode = FromPrimitive::from_i32(i).unwrap();
+                istr.push(format!("{:?}", oc))
+            }
+            let p: String = name.to_uppercase();
+            istr.contains(&p)
+        }
+
+        pub fn from_string(name: &String) -> Option<OpCode> {
+            let mut istr: Vec<String> = Vec::with_capacity(OpCode::COUNT as usize);
+
+            for i in 0..(OpCode::COUNT as i32) {
+                let oc: OpCode = FromPrimitive::from_i32(i).unwrap();
+
+                istr.push(format!("{:?}", oc))
+            }
+
+            let primitive = name.to_uppercase();
+
+            let i = istr.iter().position(|ins| &primitive == ins);
+            match i {
+                Some(idx) => FromPrimitive::from_usize(idx),
+                None => None,
+            }
+        }
+
     }
 
     pub struct FlowStructure {
@@ -562,6 +651,338 @@ mod env_vars {
                 }
             }
         }
+    }
+}
+
+pub mod parser {
+    use std::io::Read;
+    use crate::structures::data_types::DataType;
+
+    #[derive(Debug)]
+    pub enum ParserError {
+        EOF,
+        NAC
+    }
+
+    pub struct Parser {
+        stream: Vec<char>,
+        pub tokens: Vec<String>
+    }
+
+    impl Parser {
+        pub fn init(string: String) -> Self {
+            let vec: Vec<char> = string.chars().rev().take(string.len()).collect();
+            Parser {
+                stream: vec,
+                tokens: Vec::new(),
+            }
+        }
+
+        fn read(&self) -> Result<char, ParserError> {
+            if self.stream.len() <= 0 {
+                return Err(ParserError::EOF);
+            }
+            let c: char = self.stream[self.stream.len() - 1];
+
+            Ok(c)
+        }
+
+        fn consume_char(&mut self) -> Result<char, ParserError> {
+
+            if self.stream.len() <= 0 {
+                return Err(ParserError::EOF);
+            }
+
+            let chr = self.stream.pop().unwrap();
+
+            Ok(chr)
+        }
+
+        fn read_string(&mut self) -> String {
+            let mut str: String = String::new();
+            let mut stack: Vec<char> = vec![self.consume_char().unwrap()];
+
+            while stack.len() > 0 {
+                let c: char = self.consume_char().unwrap();
+
+                if c == '"' {
+                    stack.pop();
+                    break;
+                }
+                str.push(c);
+            }
+
+            str
+        }
+
+        fn read_comment(&mut self) -> String {
+            let mut comment: String = String::new();
+            let trim :[char; 2] = ['\n', '\r'];
+            let mut c: char = self.consume_char().unwrap();
+
+            while self.stream.len() > 0 && !trim.contains(&c) {
+                comment.push(c);
+                c = self.consume_char().unwrap();
+            }
+            comment
+        }
+
+        fn read_char(&mut self) -> String {
+            let mut str = String::new();
+            let mut stack: Vec<char> = vec![self.consume_char().unwrap()];
+
+            while stack.len() > 0 {
+                let c = self.consume_char().unwrap();
+
+                if c == '\'' {
+                    stack.pop();
+                    continue;
+                }
+                str.push(c);
+            }
+
+            str
+        }
+
+        fn read_raw(&mut self) -> String {
+            let mut raw: String = String::new();
+            let trim:[char;5] = [' ', ',', '\n', '\r', '\t'];
+            let mut c:char = self.consume_char().unwrap();
+
+            while self.stream.len() > 0 && !trim.contains(&c) {
+                raw.push(c);
+                c = self.consume_char().unwrap();
+            }
+
+            raw
+        }
+
+        fn next(&mut self) -> Option<String> {
+            let c = self.read().unwrap();
+            match c {
+                '"' => {
+                    Some(self.read_string())
+                },
+                ';' => {
+                    Some(self.read_comment())
+                },
+                '\'' => {
+                    Some(self.read_char())
+                },
+                _ => {
+                    let raw = self.read_raw();
+
+                    if raw.is_empty() {
+                        return None;
+                    }
+
+                    Some(raw)
+                }
+            }
+
+        }
+
+        pub fn parse(&mut self) -> &Vec<String> {
+            while self.stream.len() > 0 {
+                match self.next() {
+                    Some(token) => self.tokens.push(token),
+                    None => continue,
+                }
+            }
+
+            &self.tokens
+        }
+    }
+}
+
+pub mod tokens {
+    use std::fmt::{Display, Formatter};
+    use crate::structures::data_types::{AnyData, DataType};
+    use crate::structures::flow_structure::OpCode;
+    use crate::structures::registers::Register;
+
+    pub type TokensData = AnyData;
+
+    pub enum Tokens {
+        CHECKPOINT(String),
+        GOTO(String),
+        DATA(DataType, TokensData),
+        INSTRUCTION(OpCode),
+        REGISTER(Register),
+        COMMENT(String)
+    }
+
+    impl Display for Tokens {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Tokens::CHECKPOINT(str) => f.write_fmt(format_args!("<Checkpoint {}>", str)),
+                Tokens::GOTO(str) => f.write_fmt(format_args!("<Goto {}>", str)),
+                Tokens::DATA(t, d) => match t {
+                    DataType::Uint32 => { f.write_fmt(format_args!("<Uint32 {}>", d.uint32)) }
+                    DataType::Uint64 => { f.write_fmt(format_args!("<Uint64 {}>", d.uint64)) }
+                    DataType::Int32 => { f.write_fmt(format_args!("<Int32 {}>", d.int32)) }
+                    DataType::Int64 => { f.write_fmt(format_args!("<Int64 {}>", d.int64)) }
+                    DataType::Float => { f.write_fmt(format_args!("<Float {}>", d.float)) }
+                    DataType::Double => { f.write_fmt(format_args!("<Double {}>", d.double)) }
+                    DataType::String => { f.write_fmt(format_args!("<String {}>", d.string.as_str())) }
+                    DataType::Char => { f.write_fmt(format_args!("<Char {}>", d.char)) }
+                    DataType::Register => { f.write_fmt(format_args!("<Register {:?}>", d.register)) }
+                },
+                Tokens::INSTRUCTION(istr) => f.write_fmt(format_args!("<Instruction {:?}>", istr)),
+                Tokens::REGISTER(reg) => f.write_fmt(format_args!("<Register {:?}>", reg)),
+                Tokens::COMMENT(str) => f.write_fmt(format_args!("<Comment \"{}\"", str)),
+            }
+        }
+    }
+}
+
+mod stoi {
+    pub struct Stoi{}
+
+    impl Stoi {
+        fn stoi(str: &String, r: i64) -> i64 {
+            let c_table: Vec<char> = vec!['0', '1', '2', '3', '4', '5', '6', '7', '8',
+                                          '9', 'A', 'B', 'C', 'D', 'E', 'F'];
+            let mut chars = str.chars();
+            let mut mlt: i64 = -1;
+            let mut val: i64 = 0;
+
+            if !(chars.next() == Some('-')) {
+                mlt *= -1;
+                chars = str.chars();
+            }
+            let mut d: i64 = 1;
+            loop {
+                match chars.next_back() {
+                    Some(v) => {
+                        match c_table.binary_search(&v) {
+                            Ok(i) => {
+                                val += i as i64 * d;
+                                d *= r;
+                            }
+                            Err(_) => break
+                        }
+                    }
+                    None => break
+                }
+            }
+            val * mlt
+        }
+
+        pub fn to_int(str: &String) -> Option<i64> {
+            let prefix: String = str.chars().take(2).collect();
+            let base: usize = match prefix.as_str() {
+                "0b" => 2,
+                "0o" => 8,
+                "0x" => 16,
+                _ => 10,
+            };
+            let chars: Vec<char> = vec!['0', '1', '2', '3', '4', '5', '6', '7', '8',
+                                        '9', 'A', 'B', 'C', 'D', 'E', 'F'];
+            let sub = &chars[0..base];
+            let mut cs = str.chars();
+            let fc = cs.next();
+            if !(fc == Some('-')) {
+                cs = str.chars();
+            }
+            if base != 10 {
+                cs.next();
+                cs.next();
+            }
+            for c in cs {
+                if !sub.contains(&c){
+                    return None;
+                }
+            }
+            Some(Stoi::stoi(str, base as i64))
+        }
+    }
+}
+
+pub mod tokenizer {
+    use crate::structures::data_types::{AnyData, DataType};
+    use crate::structures::registers::Register;
+    // use crate::structures::data_types::DataType::Register;
+    use crate::structures::parser::Parser;
+    use crate::structures::flow_structure::OpCode;
+    use crate::structures::tokens::Tokens;
+    use crate::structures::stoi::Stoi;
+
+
+    pub struct Tokenizer {
+        parser: Parser,
+        pos: usize,
+        tokens: Vec<Tokens>,
+        cp: Vec<String>,
+        lop: Option<OpCode>
+    }
+
+    impl Tokenizer {
+        pub fn init(parsed_arg: Parser) -> Self{
+            Tokenizer {parser: parsed_arg, pos: 0, tokens: Vec::new(), cp: Vec::new(), lop: None}
+        }
+
+        fn iscp(token: &String) -> bool {
+            token.starts_with(":")
+        }
+
+        fn iscomment(token: &String) -> bool {
+            token.starts_with(";")
+        }
+
+        fn isgoto(&self, tok: &String) -> bool {
+            let cp_name: String = format!(":{}", tok);
+            let jop = vec![OpCode::JMP, OpCode::JNE, OpCode::JE];
+
+            match self.lop {
+                Some(op) => self.cp.contains(&cp_name) && jop.contains(&op),
+                None => false,
+            }
+        }
+
+        fn next(&mut self) -> Tokens {
+            let tok: &String = &self.parser.tokens[self.pos];
+            self.pos += 1;
+
+            if Register::is_reg(tok) {
+                Tokens::REGISTER(Register::from_string(tok).unwrap())
+            } else if OpCode::isop(tok) {
+                self.lop = OpCode::from_string(tok);
+                Tokens::INSTRUCTION(OpCode::from_string(tok).unwrap())
+            } else if Tokenizer::iscp(tok) {
+                Tokens::CHECKPOINT(String::from(tok))
+            } else if Tokenizer::iscomment(tok) {
+                Tokens::COMMENT(String::from(tok))
+            } else if self.isgoto(tok) {
+                Tokens::GOTO(String::from(tok))
+            } else {
+                match Stoi::to_int(tok) {
+                    Some(value) => return Tokens::DATA(DataType::Int64, AnyData::from(value)),
+                    None => {},
+                }
+
+                Tokens::DATA(DataType::String, AnyData::from(tok))
+            }
+        }
+
+        fn getcp(&mut self) {
+            for t in &self.parser.tokens {
+                if Tokenizer::iscp(t) {
+                    self.cp.push(String::from(t));
+                }
+            }
+        }
+
+        pub fn tokenize(&mut self) -> &Vec<Tokens> {
+            self.getcp();
+
+            while self.pos < self.parser.tokens.len() {
+                let tok = self.next();
+                self.tokens.push(tok);
+            }
+            &self.tokens
+        }
+
     }
 }
 
