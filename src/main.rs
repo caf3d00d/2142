@@ -1,10 +1,10 @@
-use std::{fs, io};
-use std::io::Write;
-use std::process::exit;
 use crate::structures::interpreter::Interpreter;
 use crate::structures::parser::Parser;
 use crate::structures::structures::GeneralStructure;
 use crate::structures::tokenizer::Tokenizer;
+use std::io::Write;
+use std::process::exit;
+use std::{fs, io};
 
 pub mod structures;
 
@@ -74,7 +74,7 @@ fn main() {
     let input = fs::read_to_string(&args[1]).expect("Panix");
     let mut parse: Parser = Parser::init(String::from(input));
     parse.parse();
-    let mut tokens =  Tokenizer::init(parse);
+    let mut tokens = Tokenizer::init(parse);
     let interpreted = Interpreter::interpret(tokens.tokenize());
     let mut r = GeneralStructure::init(interpreted);
     r.run();
